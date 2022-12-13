@@ -8,7 +8,16 @@ import (
 
 func main() {
 	handler := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-		resp := []byte(`{"status": "ok"}`)
+		var resp []byte
+		if req.URL.Path == "/status" {
+			resp = []byte(`{"status": "ok"}`)
+		} else if req.URL.Path == "/username" {
+			resp = []byte(`{"username": "colin"}`)
+		} else {
+			rw.WriteHeader(http.StatusNotFound)
+			return
+		}
+
 		rw.Header().Set("Content-Type", "application/json")
 		rw.Header().Set("Content-Length", fmt.Sprint(len(resp)))
 		rw.Write(resp)
