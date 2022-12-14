@@ -1,19 +1,40 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"github.com/gobwas/ws"
 	"github.com/gobwas/ws/wsutil"
 	"log"
 	"net/http"
-	"time"
+	"sync"
 )
+
+type Document struct {
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}
+
+var document = Document{
+	Title: "Test document",
+	Body:  "Hello world\nhere is a second line",
+} //TODO HACK: only one document for now
+var documentMutex sync.Mutex
+var documentCond = sync.NewCond(&documentMutex)
 
 func main() {
 	handler := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-		var resp []byte
 		if req.URL.Path == "/handler-initial-data" {
-			resp = []byte(`{"text": "initial"}`)
+			var documentBytes bytes.Buffer
+			err := json.NewEncoder(&documentBytes).Encode(&document)
+			if err != nil {
+				log.Println("Error encoding document: ", err)
+				return
+			}
+			rw.Header().Set("Content-Type", "application/json")
+			rw.Header().Set("Content-Length", fmt.Sprint(documentBytes.Len()))
+			rw.Write(documentBytes.Bytes())
 		} else if req.URL.Path == "/handler" {
 			conn, _, _, err := ws.UpgradeHTTP(req, rw)
 			if err != nil {
@@ -24,22 +45,49 @@ func main() {
 			go func() {
 				defer conn.Close()
 
-				time.Sleep(time.Second) //TODO HACK: sleep a second to check everything is working properly
-				err = wsutil.WriteServerMessage(conn, ws.OpText, []byte(`{"text": "from-websocket"}`))
-				if err != nil {
-					log.Println("Error writing WebSocket data: ", err)
-					return
+				for { //send the document to the frontend when it changes
+					documentMutex.Lock()
+					documentCond.Wait()
+					documentMutex.Unlock()
+
+					var documentBytes bytes.Buffer
+					err := json.NewEncoder(&documentBytes).Encode(&document)
+					if err != nil {
+						log.Println("Error encoding document: ", err)
+						return
+					}
+
+					err = wsutil.WriteServerMessage(conn, ws.OpText, documentBytes.Bytes())
+					if err != nil {
+						log.Println("Error writing WebSocket data: ", err)
+						return
+					}
 				}
 			}()
-			return
+			go func() {
+				for { //the client is asking to change the document
+					defer conn.Close()
+
+					data, err := wsutil.ReadClientText(conn)
+					if err != nil {
+						log.Println("Error encoding document: ", err)
+						return
+					}
+
+					documentMutex.Lock()
+					err = json.Unmarshal(data, &document)
+					if err != nil {
+						documentMutex.Unlock()
+						log.Println("Error unmarshalling document: ", err)
+						return
+					}
+					documentCond.Broadcast()
+					documentMutex.Unlock()
+				}
+			}()
 		} else {
 			rw.WriteHeader(http.StatusNotFound)
-			return
 		}
-
-		rw.Header().Set("Content-Type", "application/json")
-		rw.Header().Set("Content-Length", fmt.Sprint(len(resp)))
-		rw.Write(resp)
 	})
 
 	log.Println("Server is available at http://localhost:8000")

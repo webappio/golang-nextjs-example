@@ -25,10 +25,23 @@ export default function Home(props) {
             </Head>
 
             <main className={styles.main}>
-                <h1 className={styles.title}>
-                    {props.title || "Untitled Document"}
-                </h1>
-                <div>Data is: {JSON.stringify(data)}</div>
+                <input
+                    className={styles.title}
+                    onChange={e => ws.send(JSON.stringify({
+                        "title": e.target.value,
+                        "body": data.body,
+                    }))}
+                    value={data.title || "Untitled Document"}
+                />
+
+                <textarea
+                    className={styles.document}
+                    onChange={e => ws.send(JSON.stringify({
+                        "title": data.title,
+                        "body": e.target.value,
+                    }))}
+                    value={data.body || ""}
+                />
             </main>
         </div>
     )
